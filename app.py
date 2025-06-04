@@ -54,7 +54,7 @@ def parse_docx(file_path):
         elif text.lower().startswith("remarks"):
             current_section = "remarks"
             continue
-        elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):
+        elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):  # Edit line detection
             current_section = "edits"
         elif text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
             current_section = "images"
@@ -77,12 +77,13 @@ def parse_docx(file_path):
                 remarks_content.append(text)
         
         elif current_section == "edits":
-            match = re.match(r"^(\d+)\.\s*(\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?)\s*(.+)", text)
+            # More flexible regex pattern to match your document's format
+            match = re.match(r"^(\d+)\.\s*(\d{2}:\d{2}:\d{2})\s*(.*)", text)
             if match:
                 number, time, description = match.groups()
                 data["edits"].append({
                     "number": int(number),
-                    "time": time,
+                    "time": time.strip(),
                     "description": description.strip()
                 })
         
