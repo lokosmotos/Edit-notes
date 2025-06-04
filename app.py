@@ -13,34 +13,58 @@ def parse_docx(file):
         "images": []
     }
     
-    # Parse metadata
+    # Initialize metadata with default values
+    metadata_fields = ["title", "genre", "version", "language", "secondary", "subtitles", "runtime", "date", "remarks"]
+    for field in metadata_fields:
+        data["metadata"][field] = ""
+    
+    # Parse the document
     current_section = None
+    last_key = None
     for para in doc.paragraphs:
         text = para.text.strip()
+        if not text:  # Skip empty lines
+            continue
+
+        # Identify sections
         if text == "Edit Notes":
             current_section = "metadata"
+            continue
         elif text == "Remarks:":
             current_section = "remarks"
-        elif text.startswith("1."):
+            continue
+        elif re.match(r"\d+\.\s+\d{2}:\d{2}:\d{2}", text):
             current_section = "edits"
         elif text.endswith((".jpg", ".jpeg", ".png")):
             current_section = "images"
-        
-        if current_section == "metadata" and ":" in text:
-            key, value = map(str.strip, text.split(":", 1))
-            if key in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]:
-                data["metadata"][key.lower()] = value
-        elif current_section == "remarks" and text and text != "Remarks:":
+
+        # Parse based on section
+        if current_section == "metadata":
+            if text in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]:
+                last_key = text.lower()
+            elif last_key and text:  # Value for the last key
+                data["metadata"][last_key] = text
+                last_key = None
+            elif ": " in text:  # Handle fields like "Version: Complete"
+                key, value = map(str.strip, text.split(": ", 1))
+                if key.lower() in metadata_fields:
+                    data["metadata"][key.lower()] = value
+        elif current_section == "remarks" and text != "Remarks:":
             data["metadata"]["remarks"] = text
-        elif current_section == "edits" and text and re.match(r"\d+\.\s+\d{2}:\d{2}:\d{2}", text):
-            time_match = re.match(r"\d+\.\s+(\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?)\s+(.+)", text)
-            if time_match:
-                time, description = time_match.groups()
+        elif current_section == "edits":
+            match = re.match(r"\d+\.\s+(\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?)\s+(.+)", text)
+            if match:
+                time, description = match.groups()
                 data["edits"].append({"time": time, "description": description})
-        elif current_section == "images" and text and text.endswith((".jpg", ".jpeg", ".png")):
-            data["images"].append(text)
-    
+        elif current_section == "images":
+            if text.endswith((".jpg", ".jpeg", ".png")):
+                data["images"].append(text)
+
+    # Set filename and default remarks
     data["metadata"]["filename"] = os.path.basename(file.filename)
+    if not data["metadata"]["remarks"]:
+        data["metadata"]["remarks"] = "None"
+    
     return data
 
 @app.route("/", methods=["GET", "POST"])
