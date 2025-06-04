@@ -39,58 +39,64 @@ def parse_docx(file_path):
     }
     
     current_section = None
+    last_key = None
+    in_metadata = False
     
     for para in doc.paragraphs:
-        text = para.text.strip()
+        # Replace tabs with spaces for consistency, but preserve structure
+        text = para.text.replace('\t', ' ').strip()
         if not text:
             continue
 
         # Section detection
         if text.lower() == "edit notes":
+            in_metadata = True
             current_section = "metadata"
             continue
         elif text.lower().startswith("remarks"):
             current_section = "remarks"
             if ":" in text:
-                data["metadata"]["remarks"] = text.split(":", 1)[1].strip()
+                data["metadata"]["remarks"] = text.split(":", 1)[1].strip() or "None"
             continue
-        elif re.match(r"^\d+\.\t\d{2}:\d{2}:\d{2}\t", text):  # Edit line pattern
+        elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):
             current_section = "edits"
+            in_metadata = False
         elif text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
             current_section = "images"
 
-        # Parse metadata (tab-separated)
-        if current_section == "metadata":
-            if "\t" in text:  # Tab-separated key-value pairs
-                parts = [p.strip() for p in text.split("\t") if p.strip()]
-                for i in range(0, len(parts)-1, 2):
-                    key = parts[i].lower()
-                    if key in data["metadata"]:
-                        data["metadata"][key] = parts[i+1].replace("Version:", "").strip()
-            
-        # Parse edits (tab-separated)
-        elif current_section == "edits":
-            if "\t" in text and text[0].isdigit():
-                parts = [p.strip() for p in text.split("\t") if p.strip()]
-                if len(parts) >= 3:
-                    try:
-                        edit_number = int(parts[0].strip('.'))
-                        timestamp = parts[1]
-                        description = ' '.join(parts[2:])  # Combine remaining parts
-                        
-                        data["edits"].append({
-                            "number": edit_number,
-                            "time": timestamp,
-                            "description": description
-                        })
-                    except (ValueError, IndexError) as e:
-                        print(f"Error parsing edit line: {text}\nError: {e}")
-                        continue
+        # Parse metadata (multi-line, key on one line, value on the next)
+        if current_section == "metadata" and in_metadata:
+            if text in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]:
+                last_key = text.lower()
+            elif ": " in text:  # Handle "Version: Complete"
+                key, value = map(str.strip, text.split(": ", 1))
+                if key.lower() in data["metadata"]:
+                    data["metadata"][key.lower()] = value
+            elif last_key and text and not any(k.lower() in text.lower() for k in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]):
+                data["metadata"][last_key] = text
+                last_key = None
 
         # Parse remarks
         elif current_section == "remarks" and not text.lower().startswith("remarks"):
-            data["metadata"]["remarks"] = text.strip()
+            data["metadata"]["remarks"] = text.strip() or "None"
             
+        # Parse edits
+        elif current_section == "edits":
+            # Match lines like "1. 00:10:44 Edit subtitle..." or "1. 00:02:58 - 00:03:15 Edit out..."
+            match = re.match(r"(\d+)\.\s*(\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?)\s*(.+)", text)
+            if match:
+                edit_number, timestamp, description = match.groups()
+                try:
+                    edit_number = int(edit_number)
+                    data["edits"].append({
+                        "number": edit_number,
+                        "time": timestamp,
+                        "description": description.strip()
+                    })
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing edit line: {text}\nError: {e}")
+                    continue
+
         # Parse images
         elif current_section == "images":
             if text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
