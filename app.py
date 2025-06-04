@@ -1,9 +1,10 @@
-from flask import Flask, request, render_template, jsonify, send_from_directory
+from flask import Flask, request, render_template, send_from_directory
 from docx import Document
 import re
 import os
 from werkzeug.utils import secure_filename
-import json
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
 from datetime import datetime
 
 app = Flask(__name__)
@@ -97,6 +98,72 @@ def parse_docx(file_path):
 
     return data
 
+def create_excel(data):
+    """Create an Excel file from the parsed data."""
+    wb = Workbook()
+    
+    # Metadata Sheet
+    ws_metadata = wb.active
+    ws_metadata.title = "Metadata"
+    ws_metadata['A1'] = "Field"
+    ws_metadata['B1'] = "Value"
+    ws_metadata['A1'].font = Font(bold=True)
+    ws_metadata['B1'].font = Font(bold=True)
+    ws_metadata.column_dimensions['A'].width = 20
+    ws_metadata.column_dimensions['B'].width = 50
+
+    metadata_rows = [
+        ("Title", data["metadata"]["title"]),
+        ("Genre", data["metadata"]["genre"]),
+        ("Version", data["metadata"]["version"]),
+        ("Primary Language", data["metadata"]["language"]),
+        ("Secondary Language", data["metadata"]["secondary"]),
+        ("Subtitles", data["metadata"]["subtitles"]),
+        ("Runtime", data["metadata"]["runtime"]),
+        ("Date", data["metadata"]["date"]),
+        ("Remarks", data["metadata"]["remarks"]),
+        ("Filename", data["metadata"]["filename"]),
+        ("Parsed At", data["metadata"]["parsed_date"])
+    ]
+    for idx, (field, value) in enumerate(metadata_rows, start=2):
+        ws_metadata[f'A{idx}'] = field
+        ws_metadata[f'B{idx}'] = value or "N/A"
+        ws_metadata[f'A{idx}'].alignment = Alignment(vertical='top')
+        ws_metadata[f'B{idx}'].alignment = Alignment(vertical='top', wrap_text=True)
+
+    # Edits Sheet
+    ws_edits = wb.create_sheet(title="Edits")
+    ws_edits['A1'] = "Edit Number"
+    ws_edits['B1'] = "Timestamp"
+    ws_edits['C1'] = "Description"
+    ws_edits['A1'].font = Font(bold=True)
+    ws_edits['B1'].font = Font(bold=True)
+    ws_edits['C1'].font = Font(bold=True)
+    ws_edits.column_dimensions['A'].width = 15
+    ws_edits.column_dimensions['B'].width = 20
+    ws_edits.column_dimensions['C'].width = 60
+
+    for idx, edit in enumerate(data["edits"], start=2):
+        ws_edits[f'A{idx}'] = edit["number"]
+        ws_edits[f'B{idx}'] = edit["time"]
+        ws_edits[f'C{idx}'] = edit["description"]
+        ws_edits[f'C{idx}'].alignment = Alignment(wrap_text=True)
+
+    # Images Sheet
+    if data["images"]:
+        ws_images = wb.create_sheet(title="Images")
+        ws_images['A1'] = "Image Filename"
+        ws_images['A1'].font = Font(bold=True)
+        ws_images.column_dimensions['A'].width = 30
+        for idx, image in enumerate(data["images"], start=2):
+            ws_images[f'A{idx}'] = image
+
+    # Save the workbook
+    filename = secure_filename(f"{data['metadata']['filename'].rsplit('.', 1)[0]}_parsed_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx")
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    wb.save(filepath)
+    return filename
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     """Handle file uploads and render the main page."""
@@ -117,33 +184,13 @@ def index():
             file.save(filepath)
             
             data = parse_docx(filepath)
-            return render_template('index.html', data=data)
+            excel_filename = create_excel(data)
+            return render_template('index.html', download_url=f'/download/{excel_filename}')
             
         except Exception as e:
             return render_template('index.html', error=f'Error processing file: {str(e)}')
     
-    return render_template('index.html', data=None)
-
-@app.route('/export/json', methods=['POST'])
-def export_json():
-    """Export parsed data as a JSON file."""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        filename = secure_filename(f"{data.get('metadata', {}).get('filename', 'edit_notes')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        return jsonify({
-            'download_url': f'/download/{filename}',
-            'filename': filename
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return render_template('index.html', download_url=None)
 
 @app.route('/download/<filename>')
 def download_file(filename):
