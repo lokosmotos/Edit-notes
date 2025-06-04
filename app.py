@@ -39,11 +39,9 @@ def parse_docx(file_path):
     }
     
     current_section = None
-    last_key = None
-    remarks_content = []
     
     for para in doc.paragraphs:
-        text = para.text.replace('\t', ' ').strip()
+        text = para.text.strip()
         if not text:
             continue
 
@@ -53,47 +51,51 @@ def parse_docx(file_path):
             continue
         elif text.lower().startswith("remarks"):
             current_section = "remarks"
+            if ":" in text:
+                data["metadata"]["remarks"] = text.split(":", 1)[1].strip()
             continue
-        elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):  # Edit line detection
+        elif re.match(r"^\d+\.\t\d{2}:\d{2}:\d{2}\t", text):  # Edit line pattern
             current_section = "edits"
         elif text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
             current_section = "images"
 
-        # Section parsing
+        # Parse metadata (tab-separated)
         if current_section == "metadata":
-            if ": " in text:
-                key, value = map(str.strip, text.split(": ", 1))
-                key_lower = key.lower()
-                if key_lower in data["metadata"]:
-                    data["metadata"][key_lower] = value
-            elif text.lower() in [k.lower() for k in data["metadata"].keys()]:
-                last_key = text.lower()
-            elif last_key:
-                data["metadata"][last_key] = text
-                last_key = None
-        
-        elif current_section == "remarks":
-            if not text.lower().startswith("remarks"):
-                remarks_content.append(text)
-        
+            if "\t" in text:  # Tab-separated key-value pairs
+                parts = [p.strip() for p in text.split("\t") if p.strip()]
+                for i in range(0, len(parts)-1, 2):
+                    key = parts[i].lower()
+                    if key in data["metadata"]:
+                        data["metadata"][key] = parts[i+1].replace("Version:", "").strip()
+            
+        # Parse edits (tab-separated)
         elif current_section == "edits":
-            # More flexible regex pattern to match your document's format
-            match = re.match(r"^(\d+)\.\s*(\d{2}:\d{2}:\d{2})\s*(.*)", text)
-            if match:
-                number, time, description = match.groups()
-                data["edits"].append({
-                    "number": int(number),
-                    "time": time.strip(),
-                    "description": description.strip()
-                })
-        
+            if "\t" in text and text[0].isdigit():
+                parts = [p.strip() for p in text.split("\t") if p.strip()]
+                if len(parts) >= 3:
+                    try:
+                        edit_number = int(parts[0].strip('.'))
+                        timestamp = parts[1]
+                        description = ' '.join(parts[2:])  # Combine remaining parts
+                        
+                        data["edits"].append({
+                            "number": edit_number,
+                            "time": timestamp,
+                            "description": description
+                        })
+                    except (ValueError, IndexError) as e:
+                        print(f"Error parsing edit line: {text}\nError: {e}")
+                        continue
+
+        # Parse remarks
+        elif current_section == "remarks" and not text.lower().startswith("remarks"):
+            data["metadata"]["remarks"] = text.strip()
+            
+        # Parse images
         elif current_section == "images":
             if text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
                 data["images"].append(text)
 
-    if remarks_content:
-        data["metadata"]["remarks"] = "\n".join(remarks_content)
-    
     return data
 
 @app.route('/', methods=['GET', 'POST'])
