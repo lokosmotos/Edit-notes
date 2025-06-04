@@ -119,24 +119,27 @@ def index():
         except Exception as e:
             return render_template('index.html', error=f'Error processing file: {str(e)}')
     
-    return render_template('index.html')
+    return render_template('index.html', data=None)  # Explicitly pass None for initial load
 
 @app.route('/export/json', methods=['POST'])
 def export_json():
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
-    
-    filename = secure_filename(f"{data['metadata']['filename']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
-    
-    return jsonify({
-        'download_url': f'/download/{filename}',
-        'filename': filename
-    })
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        filename = secure_filename(f"{data.get('metadata', {}).get('filename', 'edit_notes')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        return jsonify({
+            'download_url': f'/download/{filename}',
+            'filename': filename
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<filename>')
 def download_file(filename):
