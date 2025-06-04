@@ -40,17 +40,15 @@ def parse_docx(file_path):
     
     current_section = None
     last_key = None
-    in_metadata = False
     
     for para in doc.paragraphs:
-        # Replace tabs with spaces for consistency, but preserve structure
-        text = para.text.replace('\t', ' ').strip()
+        # Normalize text: replace multiple spaces/tabs with a single space, strip whitespace
+        text = re.sub(r'\s+', ' ', para.text).strip()
         if not text:
             continue
 
         # Section detection
         if text.lower() == "edit notes":
-            in_metadata = True
             current_section = "metadata"
             continue
         elif text.lower().startswith("remarks"):
@@ -60,12 +58,12 @@ def parse_docx(file_path):
             continue
         elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):
             current_section = "edits"
-            in_metadata = False
         elif text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+            # Start collecting images once we encounter the first image
             current_section = "images"
 
-        # Parse metadata (multi-line, key on one line, value on the next)
-        if current_section == "metadata" and in_metadata:
+        # Parse metadata
+        if current_section == "metadata":
             if text in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]:
                 last_key = text.lower()
             elif ": " in text:  # Handle "Version: Complete"
