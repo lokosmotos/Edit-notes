@@ -11,25 +11,23 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'docx'}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB limit
 
-# Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def parse_docx(file_path):
     doc = Document(file_path)
     data = {
         "metadata": {
-            "title": "",
-            "genre": "",
-            "version": "",
-            "language": "",
-            "secondary": "",
-            "subtitles": "",
-            "runtime": "",
-            "date": "",
+            "title": "N/A",
+            "genre": "N/A",
+            "version": "N/A",
+            "language": "N/A",
+            "secondary": "N/A",
+            "subtitles": "N/A",
+            "runtime": "N/A",
+            "date": "N/A",
             "remarks": "None",
             "filename": os.path.basename(file_path),
             "parsed_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -37,13 +35,12 @@ def parse_docx(file_path):
         "edits": [],
         "images": []
     }
-    
+
     current_section = None
-    last_key = None
-    
+    collecting_remarks = False
+
     for para in doc.paragraphs:
-        # Normalize text: replace multiple spaces/tabs with a single space, strip whitespace
-        text = re.sub(r'\s+', ' ', para.text).strip()
+        text = para.text.strip()
         if not text:
             continue
 
@@ -54,50 +51,62 @@ def parse_docx(file_path):
         elif text.lower().startswith("remarks"):
             current_section = "remarks"
             if ":" in text:
-                data["metadata"]["remarks"] = text.split(":", 1)[1].strip() or "None"
+                data["metadata"]["remarks"] = text.split(":", 1)[1].strip()
+            collecting_remarks = True
             continue
-        elif re.match(r"^\d+\.\s*\d{2}:\d{2}:\d{2}", text):
+        elif re.match(r"^\d+\.\s+(\d{2}:\d{2}:\d{2})(?:\s*-\s*(\d{2}:\d{2}:\d{2}))?", text):
             current_section = "edits"
-        elif text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
-            # Start collecting images once we encounter the first image
+            collecting_remarks = False
+        elif text.lower().endswith((".jpg", ".jpeg", ".png")):
             current_section = "images"
+            collecting_remarks = False
 
-        # Parse metadata
+        # Metadata parsing
         if current_section == "metadata":
-            if text in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]:
-                last_key = text.lower()
-            elif ": " in text:  # Handle "Version: Complete"
-                key, value = map(str.strip, text.split(": ", 1))
-                if key.lower() in data["metadata"]:
-                    data["metadata"][key.lower()] = value
-            elif last_key and text and not any(k.lower() in text.lower() for k in ["Title", "Genre", "Version", "Language", "Secondary", "Subtitles", "Runtime", "Date"]):
-                data["metadata"][last_key] = text
-                last_key = None
+            if ": " in text:
+                key, value = [part.strip() for part in text.split(": ", 1)]
+                key_lower = key.lower()
+                if key_lower in data["metadata"]:
+                    data["metadata"][key_lower] = value
+            elif ":" in text:  # Handle cases like "Remarks: None"
+                key, value = [part.strip() for part in text.split(":", 1)]
+                key_lower = key.lower()
+                if key_lower in data["metadata"]:
+                    data["metadata"][key_lower] = value
 
-        # Parse remarks
-        elif current_section == "remarks" and not text.lower().startswith("remarks"):
-            data["metadata"]["remarks"] = text.strip() or "None"
-            
-        # Parse edits
+        # Edit parsing
         elif current_section == "edits":
-            # Match lines like "1. 00:10:44 Edit subtitle..." or "1. 00:02:58 - 00:03:15 Edit out..."
-            match = re.match(r"(\d+)\.\s*(\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?)\s*(.+)", text)
+            # Match formats:
+            # 1. 00:02:58 - 00:03:15 Edit out bikini scene
+            # 2. 00:06:57 Edit subtitle: "dammit" (oh God)
+            match = re.match(r"^(\d+)\.\s+(\d{2}:\d{2}:\d{2})(?:\s*-\s*(\d{2}:\d{2}:\d{2}))?\s*(.+)", text)
             if match:
-                edit_number, timestamp, description = match.groups()
-                try:
-                    edit_number = int(edit_number)
-                    data["edits"].append({
-                        "number": edit_number,
-                        "time": timestamp,
-                        "description": description.strip()
-                    })
-                except (ValueError, IndexError) as e:
-                    print(f"Error parsing edit line: {text}\nError: {e}")
-                    continue
+                number = match.group(1)
+                start_time = match.group(2)
+                end_time = match.group(3)
+                description = match.group(4).strip()
+                
+                time_display = start_time
+                if end_time:
+                    time_display += f" - {end_time}"
+                
+                data["edits"].append({
+                    "number": int(number),
+                    "time": time_display,
+                    "description": description
+                })
 
-        # Parse images
+        # Remarks collection
+        elif collecting_remarks:
+            if not text.lower().startswith("remarks"):
+                if data["metadata"]["remarks"] == "None":
+                    data["metadata"]["remarks"] = text
+                else:
+                    data["metadata"]["remarks"] += "\n" + text
+
+        # Image collection
         elif current_section == "images":
-            if text.lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+            if text.lower().endswith((".jpg", ".jpeg", ".png")):
                 data["images"].append(text)
 
     return data
@@ -126,7 +135,7 @@ def index():
         except Exception as e:
             return render_template('index.html', error=f'Error processing file: {str(e)}')
     
-    return render_template('index.html', data=None)  # Explicitly pass None for initial load
+    return render_template('index.html', data=None)
 
 @app.route('/export/json', methods=['POST'])
 def export_json():
