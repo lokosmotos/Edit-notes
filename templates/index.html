@@ -120,20 +120,23 @@
         {% endif %}
     </div>
 
-    <script>
-        // Show loading spinner during upload
-        document.getElementById('uploadForm').addEventListener('submit', function() {
-            const btn = document.getElementById('uploadBtn');
-            const spinner = document.getElementById('spinner');
-            const btnText = document.getElementById('btnText');
-            
-            btn.disabled = true;
-            spinner.classList.remove('hidden');
-            btnText.textContent = 'Processing...';
-        });
+    <!-- In the script section at the bottom, replace the data assignment with this: -->
+<script>
+    // Show loading spinner during upload
+    document.getElementById('uploadForm').addEventListener('submit', function() {
+        const btn = document.getElementById('uploadBtn');
+        const spinner = document.getElementById('spinner');
+        const btnText = document.getElementById('btnText');
+        
+        btn.disabled = true;
+        spinner.classList.remove('hidden');
+        btnText.textContent = 'Processing...';
+    });
 
-        // Search functionality for edits
-        document.getElementById('editSearch').addEventListener('input', function(e) {
+    // Search functionality for edits
+    const editSearch = document.getElementById('editSearch');
+    if (editSearch) {
+        editSearch.addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
             const editItems = document.querySelectorAll('.edit-item');
             
@@ -142,37 +145,45 @@
                 item.style.display = text.includes(searchTerm) ? 'block' : 'none';
             });
         });
+    }
 
-        // Export as JSON
-        document.getElementById('exportJsonBtn')?.addEventListener('click', function() {
-            const data = {{ data|tojson|safe }};
-            
-            fetch('/export/json', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.download_url) {
-                    // Show success message with download link
-                    Swal.fire({
-                        title: 'Export Successful!',
-                        html: `Your JSON file is ready. <a href="${data.download_url}" class="text-blue-600 hover:underline">Click here to download</a>`,
-                        icon: 'success',
-                        confirmButtonText: 'OK'
-                    });
-                } else if (data.error) {
-                    Swal.fire('Error', data.error, 'error');
-                }
-            })
-            .catch(error => {
-                Swal.fire('Error', 'Failed to export JSON file', 'error');
-                console.error('Error:', error);
-            });
+    // Export as JSON
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    if (exportJsonBtn) {
+        exportJsonBtn.addEventListener('click', function() {
+            {% if data %}
+                const data = JSON.parse('{{ data | tojson | safe }}');
+                
+                fetch('/export/json', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.download_url) {
+                        // Show success message with download link
+                        Swal.fire({
+                            title: 'Export Successful!',
+                            html: `Your JSON file is ready. <a href="${data.download_url}" class="text-blue-600 hover:underline">Click here to download</a>`,
+                            icon: 'success',
+                            confirmButtonText: 'OK'
+                        });
+                    } else if (data.error) {
+                        Swal.fire('Error', data.error, 'error');
+                    }
+                })
+                .catch(error => {
+                    Swal.fire('Error', 'Failed to export JSON file', 'error');
+                    console.error('Error:', error);
+                });
+            {% else %}
+                Swal.fire('Error', 'No data available to export', 'error');
+            {% endif %}
         });
-    </script>
+    }
+</script>
 </body>
 </html>
